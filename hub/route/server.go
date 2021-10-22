@@ -2,6 +2,7 @@ package route
 
 import (
 	"bytes"
+	"embed"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -29,6 +30,8 @@ var (
 			return true
 		},
 	}
+
+	DashboardStatic embed.FS
 )
 
 type Traffic struct {
@@ -61,7 +64,9 @@ func Start(addr string, secret string) {
 	r.Group(func(r chi.Router) {
 		r.Use(authentication)
 
-		r.Get("/", hello)
+		r.Handle("/ui/*", http.StripPrefix("/ui/", http.FileServer(http.FS(DashboardStatic))))
+		r.Get("/hello", hello)
+		r.Get("/pac", proxypac)
 		r.Get("/logs", getLogs)
 		r.Get("/traffic", traffic)
 		r.Get("/version", version)
@@ -130,6 +135,20 @@ func authentication(next http.Handler) http.Handler {
 
 func hello(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, render.M{"hello": "clash"})
+}
+
+// proxypac serves pac for specifc device, such as IOS.
+// all http request redirected to http proxy.
+// see https://developer.mozilla.org/en-US/docs/Web/HTTP/Proxy_servers_and_tunneling/Proxy_Auto-Configuration_PAC_file
+func proxypac(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Content-type", "application/x-ns-proxy-autoconfig")
+	const pac = `
+function FindProxyForURL(url, host)
+{
+	return "PROXY 192.168.1.22:7890";
+}
+`
+	w.Write([]byte(pac))
 }
 
 func traffic(w http.ResponseWriter, r *http.Request) {

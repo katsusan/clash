@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"flag"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	C "github.com/Dreamacro/clash/constant"
 	"github.com/Dreamacro/clash/hub"
 	"github.com/Dreamacro/clash/hub/executor"
+	"github.com/Dreamacro/clash/hub/route"
 	"github.com/Dreamacro/clash/log"
 )
 
@@ -25,6 +27,9 @@ var (
 	externalUI         string
 	externalController string
 	secret             string
+
+	//go:embed dist/*
+	dashboard embed.FS
 )
 
 func init() {
@@ -41,6 +46,8 @@ func init() {
 	flag.Visit(func(f *flag.Flag) {
 		flagset[f.Name] = true
 	})
+
+	route.DashboardStatic = dashboard
 }
 
 func main() {
