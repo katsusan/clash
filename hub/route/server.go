@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
+	"io/fs"
 	"net"
 	"net/http"
 	"strings"
@@ -64,7 +65,7 @@ func Start(addr string, secret string) {
 	r.Group(func(r chi.Router) {
 		r.Use(authentication)
 
-		r.Handle("/ui/*", http.StripPrefix("/ui/", http.FileServer(http.FS(DashboardStatic))))
+		r.Handle("/dashboard/*", http.StripPrefix("/dashboard/", http.FileServer(getFS())))
 		r.Get("/hello", hello)
 		r.Get("/pac", proxypac)
 		r.Get("/logs", getLogs)
@@ -135,6 +136,14 @@ func authentication(next http.Handler) http.Handler {
 
 func hello(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, render.M{"hello": "clash"})
+}
+
+func getFS() http.FileSystem {
+	fsys, err := fs.Sub(DashboardStatic, "dist")
+	if err != nil {
+		log.Fatalln("DashboardStatic path trim failed, error=%v", err)
+	}
+	return http.FS(fsys)
 }
 
 // proxypac serves pac for specifc device, such as IOS.
