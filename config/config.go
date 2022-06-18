@@ -404,9 +404,9 @@ func parseRules(cfg *RawConfig, proxies map[string]C.Proxy) ([]C.Rule, error) {
 			return nil, fmt.Errorf("rules[%d] [%s] error: format invalid", idx, line)
 		}
 
-		if _, ok := proxies[target]; !ok {
-			return nil, fmt.Errorf("rules[%d] [%s] error: proxy [%s] not found", idx, line, target)
-		}
+		// if _, ok := proxies[target]; !ok {
+		// 	return nil, fmt.Errorf("rules[%d] [%s] error: proxy [%s] not found", idx, line, target)
+		// }
 
 		rule = trimArr(rule)
 		params = trimArr(params)
