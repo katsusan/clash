@@ -14,6 +14,7 @@ import (
 	"github.com/Dreamacro/clash/component/fakeip"
 	"github.com/Dreamacro/clash/component/resolver"
 	"github.com/Dreamacro/clash/component/trie"
+	C "github.com/Dreamacro/clash/constant"
 
 	D "github.com/miekg/dns"
 	"golang.org/x/sync/singleflight"
@@ -116,7 +117,7 @@ func (r *Resolver) ExchangeContext(ctx context.Context, m *D.Msg) (msg *D.Msg, e
 func (r *Resolver) exchangeWithoutCache(ctx context.Context, m *D.Msg) (msg *D.Msg, err error) {
 	q := m.Question[0]
 
-	ret, err, shared := r.group.Do(q.String(), func() (result interface{}, err error) {
+	ret, err, shared := r.group.Do(q.String(), func() (result any, err error) {
 		defer func() {
 			if err != nil {
 				return
@@ -152,7 +153,7 @@ func (r *Resolver) batchExchange(ctx context.Context, clients []dnsClient, m *D.
 	fast, ctx := picker.WithTimeout(ctx, resolver.DefaultDNSTimeout)
 	for _, client := range clients {
 		r := client
-		fast.Go(func() (interface{}, error) {
+		fast.Go(func() (any, error) {
 			m, err := r.ExchangeContext(ctx, m)
 			if err != nil {
 				return nil, err
@@ -215,7 +216,6 @@ func (r *Resolver) shouldOnlyQueryFallback(m *D.Msg) bool {
 }
 
 func (r *Resolver) ipExchange(ctx context.Context, m *D.Msg) (msg *D.Msg, err error) {
-
 	if matched := r.matchPolicy(m); len(matched) != 0 {
 		res := <-r.asyncExchange(ctx, matched, m)
 		return res.Msg, res.Error
@@ -302,8 +302,9 @@ func (r *Resolver) asyncExchange(ctx context.Context, client []dnsClient, msg *D
 }
 
 type NameServer struct {
-	Net  string
-	Addr string
+	Net       string
+	Addr      string
+	Interface string
 }
 
 type FallbackFilter struct {
@@ -317,7 +318,7 @@ type Config struct {
 	Main, Fallback []NameServer
 	Default        []NameServer
 	IPv6           bool
-	EnhancedMode   EnhancedMode
+	EnhancedMode   C.DNSMode
 	FallbackFilter FallbackFilter
 	Pool           *fakeip.Pool
 	Hosts          *trie.DomainTrie

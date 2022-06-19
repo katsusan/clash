@@ -22,17 +22,18 @@ import (
 	R "github.com/Dreamacro/clash/rule"
 	T "github.com/Dreamacro/clash/tunnel"
 
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // General config
 type General struct {
 	Inbound
 	Controller
-	Mode      T.TunnelMode `json:"mode"`
-	LogLevel  log.LogLevel `json:"log-level"`
-	IPv6      bool         `json:"ipv6"`
-	Interface string       `json:"-"`
+	Mode        T.TunnelMode `json:"mode"`
+	LogLevel    log.LogLevel `json:"log-level"`
+	IPv6        bool         `json:"ipv6"`
+	Interface   string       `json:"-"`
+	RoutingMark int          `json:"-"`
 }
 
 // Inbound
@@ -62,7 +63,7 @@ type DNS struct {
 	Fallback          []dns.NameServer `yaml:"fallback"`
 	FallbackFilter    FallbackFilter   `yaml:"fallback-filter"`
 	Listen            string           `yaml:"listen"`
-	EnhancedMode      dns.EnhancedMode `yaml:"enhanced-mode"`
+	EnhancedMode      C.DNSMode        `yaml:"enhanced-mode"`
 	DefaultNameserver []dns.NameServer `yaml:"default-nameserver"`
 	FakeIPRange       *fakeip.Pool
 	Hosts             *trie.DomainTrie
@@ -80,6 +81,7 @@ type FallbackFilter struct {
 // Profile config
 type Profile struct {
 	StoreSelected bool `yaml:"store-selected"`
+	StoreFakeIP   bool `yaml:"store-fake-ip"`
 }
 
 // Experimental config
@@ -106,7 +108,7 @@ type RawDNS struct {
 	Fallback          []string          `yaml:"fallback"`
 	FallbackFilter    RawFallbackFilter `yaml:"fallback-filter"`
 	Listen            string            `yaml:"listen"`
-	EnhancedMode      dns.EnhancedMode  `yaml:"enhanced-mode"`
+	EnhancedMode      C.DNSMode         `yaml:"enhanced-mode"`
 	FakeIPRange       string            `yaml:"fake-ip-range"`
 	FakeIPFilter      []string          `yaml:"fake-ip-filter"`
 	DefaultNameserver []string          `yaml:"default-nameserver"`
@@ -136,15 +138,16 @@ type RawConfig struct {
 	ExternalUI         string       `yaml:"external-ui"`
 	Secret             string       `yaml:"secret"`
 	Interface          string       `yaml:"interface-name"`
+	RoutingMark        int          `yaml:"routing-mark"`
 
-	ProxyProvider map[string]map[string]interface{} `yaml:"proxy-providers"`
-	Hosts         map[string]string                 `yaml:"hosts"`
-	DNS           RawDNS                            `yaml:"dns"`
-	Experimental  Experimental                      `yaml:"experimental"`
-	Profile       Profile                           `yaml:"profile"`
-	Proxy         []map[string]interface{}          `yaml:"proxies"`
-	ProxyGroup    []map[string]interface{}          `yaml:"proxy-groups"`
-	Rule          []string                          `yaml:"rules"`
+	ProxyProvider map[string]map[string]any `yaml:"proxy-providers"`
+	Hosts         map[string]string         `yaml:"hosts"`
+	DNS           RawDNS                    `yaml:"dns"`
+	Experimental  Experimental              `yaml:"experimental"`
+	Profile       Profile                   `yaml:"profile"`
+	Proxy         []map[string]any          `yaml:"proxies"`
+	ProxyGroup    []map[string]any          `yaml:"proxy-groups"`
+	Rule          []string                  `yaml:"rules"`
 }
 
 // Parse config
@@ -167,8 +170,8 @@ func UnmarshalRawConfig(buf []byte) (*RawConfig, error) {
 		LogLevel:       log.INFO,
 		Hosts:          map[string]string{},
 		Rule:           []string{},
-		Proxy:          []map[string]interface{}{},
-		ProxyGroup:     []map[string]interface{}{},
+		Proxy:          []map[string]any{},
+		ProxyGroup:     []map[string]any{},
 		DNS: RawDNS{
 			Enable:      false,
 			UseHosts:    true,
@@ -226,7 +229,7 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 	}
 	config.Hosts = hosts
 
-	dnsCfg, err := parseDNS(rawCfg.DNS, hosts)
+	dnsCfg, err := parseDNS(rawCfg, hosts)
 	if err != nil {
 		return nil, err
 	}
@@ -264,10 +267,11 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 			ExternalUI:         cfg.ExternalUI,
 			Secret:             cfg.Secret,
 		},
-		Mode:      cfg.Mode,
-		LogLevel:  cfg.LogLevel,
-		IPv6:      cfg.IPv6,
-		Interface: cfg.Interface,
+		Mode:        cfg.Mode,
+		LogLevel:    cfg.LogLevel,
+		IPv6:        cfg.IPv6,
+		Interface:   cfg.Interface,
+		RoutingMark: cfg.RoutingMark,
 	}, nil
 }
 
@@ -473,6 +477,10 @@ func parseNameServer(servers []string) ([]dns.NameServer, error) {
 			return nil, fmt.Errorf("DNS NameServer[%d] format error: %s", idx, err.Error())
 		}
 
+		// parse with specific interface
+		// .e.g 10.0.0.1#en0
+		interfaceName := u.Fragment
+
 		var addr, dnsNetType string
 		switch u.Scheme {
 		case "udp":
@@ -502,8 +510,9 @@ func parseNameServer(servers []string) ([]dns.NameServer, error) {
 		nameservers = append(
 			nameservers,
 			dns.NameServer{
-				Net:  dnsNetType,
-				Addr: addr,
+				Net:       dnsNetType,
+				Addr:      addr,
+				Interface: interfaceName,
 			},
 		)
 	}
@@ -541,7 +550,8 @@ func parseFallbackIPCIDR(ips []string) ([]*net.IPNet, error) {
 	return ipNets, nil
 }
 
-func parseDNS(cfg RawDNS, hosts *trie.DomainTrie) (*DNS, error) {
+func parseDNS(rawCfg *RawConfig, hosts *trie.DomainTrie) (*DNS, error) {
+	cfg := rawCfg.DNS
 	if cfg.Enable && len(cfg.NameServer) == 0 {
 		return nil, fmt.Errorf("if DNS configuration is turned on, NameServer cannot be empty")
 	}
@@ -582,7 +592,7 @@ func parseDNS(cfg RawDNS, hosts *trie.DomainTrie) (*DNS, error) {
 		}
 	}
 
-	if cfg.EnhancedMode == dns.FAKEIP {
+	if cfg.EnhancedMode == C.DNSFakeIP {
 		_, ipnet, err := net.ParseCIDR(cfg.FakeIPRange)
 		if err != nil {
 			return nil, err
@@ -597,7 +607,12 @@ func parseDNS(cfg RawDNS, hosts *trie.DomainTrie) (*DNS, error) {
 			}
 		}
 
-		pool, err := fakeip.New(ipnet, 1000, host)
+		pool, err := fakeip.New(fakeip.Options{
+			IPNet:       ipnet,
+			Size:        1000,
+			Host:        host,
+			Persistence: rawCfg.Profile.StoreFakeIP,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -620,11 +635,10 @@ func parseDNS(cfg RawDNS, hosts *trie.DomainTrie) (*DNS, error) {
 }
 
 func parseAuthentication(rawRecords []string) []auth.AuthUser {
-	users := make([]auth.AuthUser, 0)
+	users := []auth.AuthUser{}
 	for _, line := range rawRecords {
-		userData := strings.SplitN(line, ":", 2)
-		if len(userData) == 2 {
-			users = append(users, auth.AuthUser{User: userData[0], Pass: userData[1]})
+		if user, pass, found := strings.Cut(line, ":"); found {
+			users = append(users, auth.AuthUser{User: user, Pass: pass})
 		}
 	}
 	return users
