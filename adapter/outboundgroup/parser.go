@@ -123,7 +123,7 @@ func getProxies(mapping map[string]C.Proxy, list []string) ([]C.Proxy, error) {
 	for _, name := range list {
 		p, ok := mapping[name]
 		if !ok {
-			return nil, fmt.Errorf("'%s' not found", name)
+			return nil, fmt.Errorf("getProxies: '%s' not found", name)
 		}
 		ps = append(ps, p)
 	}
@@ -135,7 +135,7 @@ func getProviders(mapping map[string]types.ProxyProvider, list []string) ([]type
 	for _, name := range list {
 		p, ok := mapping[name]
 		if !ok {
-			return nil, fmt.Errorf("'%s' not found", name)
+			return nil, fmt.Errorf("getProviders: '%s' not found", name)
 		}
 
 		if p.VehicleType() == types.Compatible {
